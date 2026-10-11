@@ -11,10 +11,10 @@ import Foundation
 import CoreData
 import SideSign
 
-struct SignInResult {
-    let team: ALTTeam
-    let certificate: ALTCertificate?
-    let session: ALTAppleAPISession
+public struct SignInResult {
+    public let team: ALTTeam
+    public let certificate: ALTCertificate?
+    public let session: ALTAppleAPISession
 }
 
 final class SignInOperation: BaseStandaloneOperation<StandaloneOperationContext, SignInResult>, @unchecked Sendable {

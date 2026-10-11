@@ -179,7 +179,7 @@ public final class AuthManager: @unchecked Sendable {
     }
 
     @discardableResult
-    public func addAccount(presentingViewController: UIViewController? = nil) async throws -> SignInResult {
+    func addAccount(presentingViewController: UIViewController? = nil) async throws -> SignInResult {
         let previousAppleID = self.isAuthenticated ? self.currentAppleID : nil
         if self.isAuthenticated {
             Keychain.shared.syncActiveAccountToStore(

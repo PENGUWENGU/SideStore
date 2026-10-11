@@ -48,7 +48,7 @@ class FetchProvisioningProfilesOperation: BasePipelineOperation<InstallAppOperat
             return profiles
         }
 
-        let isRefreshOnly = self.context.weightForFirstOccurrence(of: PipelineOperationStep.RefreshAppOperation) != nil
+        let isRefreshOnly = self.context.weightForFirstOccurrence(of: PipelineStep.refreshApp) != nil
         let team = try await AuthManager.shared.getAuthenticatedTeam(
             preferringInstalledApp: self.context.installedApp,
             isRefreshOnly: isRefreshOnly

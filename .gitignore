@@ -11,6 +11,9 @@ Pods/
 ## Build generated
 build/
 DerivedData
+node_modules/
+dist/
+.vite/
 
 SideStore.xcarchive
 ## Various settings
