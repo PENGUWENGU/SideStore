@@ -2,7 +2,7 @@ name: Nightly SideStore Build
 
 on:
   push:
-    branches: [develop]
+    branches: [develop, main, master]
     paths-ignore:
       - '**.md'
       - 'LICENSE'
@@ -13,6 +13,9 @@ on:
   schedule:
     - cron: "0 0 * * *"
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 concurrency:
   group: ${{ github.ref }}
@@ -226,6 +229,7 @@ jobs:
 
       - name: Generate Metadata
         if: steps.build_gate.outputs.should_skip != 'true'
+        continue-on-error: true
         run: |
           python3 scripts/ci/workflow.py dump-project-settings
           PRODUCT_NAME=$(python3 scripts/ci/workflow.py read-product-name)
@@ -243,6 +247,7 @@ jobs:
 
       - name: Deploy
         if: steps.build_gate.outputs.should_skip != 'true' && env.DEPLOY_KEY != ''
+        continue-on-error: true
         run: |
           SOURCE_JSON="_includes/source.json"
 
@@ -258,6 +263,7 @@ jobs:
       # --------------------------------------------------
       - name: Upload Release
         if: steps.build_gate.outputs.should_skip != 'true'
+        continue-on-error: true
         run: |
           python3 scripts/ci/workflow.py upload-release \
             "$RELEASE_NAME" \

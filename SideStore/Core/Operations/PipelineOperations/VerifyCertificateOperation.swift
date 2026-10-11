@@ -29,7 +29,10 @@ final class VerifyCertificateOperation: BasePipelineOperation<InstallAppOperatio
         try await super.executePreconditionCheck(parentProgress: parentProgress)
         self.setProgress(10)
         
-        let team = try await AuthManager.shared.getAuthenticatedTeam()
+        let team = try await AuthManager.shared.getAuthenticatedTeam(
+            preferringInstalledApp: self.context.installedApp,
+            isRefreshOnly: !self.willResign
+        )
         
         let bundleID = self.context.targetBundleIdentifier
         let (appName, installedAppSerial, initialStatus) = await self.fetchInstalledAppInitialState(bundleID: bundleID)

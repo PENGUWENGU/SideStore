@@ -1,6 +1,20 @@
 name: Pull Request SideStore build
 
 on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+      - 'feat/**'
+      - 'feature/**'
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - '.editorconfig'
+      - '.gitignore'
+      - '.gitmodules'
   pull_request:
     # types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     types: [opened, synchronize, reopened, ready_for_review]
@@ -13,28 +27,33 @@ on:
       - '.github/**'
 
 concurrency:
-  group: pr-${{ github.event.pull_request.number }}
+  group: pr-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   build:
-    name: Build and upload SideStore
-    if: ${{ github.event.pull_request.draft == false }}
+    name: Build and upload SideStore IPA
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: macos-26
 
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-          fetch-depth: 1    # shallow clone just for PR
+          fetch-depth: 1    # shallow clone just for PR/IPA build
 
       - run: brew install ldid xcbeautify
 
       - name: Setup Env
         run: |
           MARKETING_VERSION=$(python3 scripts/ci/workflow.py get-marketing-version)
-          SHORT_COMMIT=$(git rev-parse --short ${{ github.event.pull_request.head.sha }})
-          NORMALIZED_VERSION="${MARKETING_VERSION}-pr.${{ github.event.pull_request.number }}+${SHORT_COMMIT}"
+          if [ -n "${{ github.event.pull_request.head.sha }}" ]; then
+            SHORT_COMMIT=$(git rev-parse --short ${{ github.event.pull_request.head.sha }})
+            NORMALIZED_VERSION="${MARKETING_VERSION}-pr.${{ github.event.pull_request.number }}+${SHORT_COMMIT}"
+          else
+            SHORT_COMMIT=$(git rev-parse --short HEAD)
+            NORMALIZED_VERSION="${MARKETING_VERSION}-build.${{ github.run_number }}+${SHORT_COMMIT}"
+          fi
           python3 scripts/ci/workflow.py set-marketing-version "$NORMALIZED_VERSION"
           echo "SHORT_COMMIT=$SHORT_COMMIT" | tee -a $GITHUB_ENV
           echo "MARKETING_VERSION=$NORMALIZED_VERSION" | tee -a $GITHUB_ENV
@@ -69,7 +88,7 @@ jobs:
         run: |
           python3 scripts/ci/workflow.py build; STATUS=$?
           python3 scripts/ci/workflow.py encrypt-build
-          mv SideStore.ipa SideStore-${{ env.MARKETING_VERSION }}.ipa
+          cp SideStore.ipa SideStore-${{ env.MARKETING_VERSION }}.ipa
           exit $STATUS
 
       - name: Save Cache

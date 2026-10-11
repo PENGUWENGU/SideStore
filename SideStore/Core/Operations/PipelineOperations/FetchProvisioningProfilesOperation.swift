@@ -48,7 +48,11 @@ class FetchProvisioningProfilesOperation: BasePipelineOperation<InstallAppOperat
             return profiles
         }
 
-        let team = try await AuthManager.shared.getAuthenticatedTeam()
+        let isRefreshOnly = self.context.weightForFirstOccurrence(of: PipelineOperationStep.RefreshAppOperation) != nil
+        let team = try await AuthManager.shared.getAuthenticatedTeam(
+            preferringInstalledApp: self.context.installedApp,
+            isRefreshOnly: isRefreshOnly
+        )
         self.debugLog("[FetchProvisioningProfiles] Executing for app \(targetAppBundle.bundleIdentifier), targetBundleID: \(effectiveBundleId), team: \(team.identifier), useMainProfile: \(self.context.useMainProfile)")
         
         self.setProgress(10)
@@ -198,14 +202,18 @@ private extension FetchProvisioningProfilesOperation{
                                name: String,
                                bundleIdentifier: String,
                                team: ALTTeam) async throws -> ALTAppID {
+        let activeTeamID = try? await AuthManager.shared.getAuthenticatedTeam().identifier
+        let isActiveTeam = (activeTeamID == nil || activeTeamID == team.identifier)
         let appIDs = try await TaskChainCoalescer.shared.coalesce(key: "fetch_app_ids_\(team.identifier)") {
-            if let cachedAppIDs = self.context.sharedContext.appIDs {
+            if isActiveTeam, let cachedAppIDs = self.context.sharedContext.appIDs {
                 self.debugLog("[FetchProvisioningProfiles] Using cached App IDs from shared context.")
                 return cachedAppIDs
             }
             self.debugLog("[FetchProvisioningProfiles] Fetching existing App IDs from Apple for team \(team.identifier)...")
             let fetchedAppIDs = try await DeveloperPortalProxy.shared.fetchAppIDs(for: team)
-            self.context.sharedContext.appIDs = fetchedAppIDs
+            if isActiveTeam {
+                self.context.sharedContext.appIDs = fetchedAppIDs
+            }
             self.verboseLog("[FetchProvisioningProfiles] Found \(fetchedAppIDs.count) existing App IDs on portal for team \(team.identifier): \(fetchedAppIDs.map { $0.bundleIdentifier })")
             return fetchedAppIDs
         }
@@ -224,7 +232,9 @@ private extension FetchProvisioningProfilesOperation{
             
             self.debugLog("[FetchProvisioningProfiles] Calling DeveloperPortalProxy.shared.addAppID with name '\(appIDName)' and identifier '\(bundleIdentifier)'...")
             let appID = try await DeveloperPortalProxy.shared.addAppID(name: appIDName, bundleIdentifier: bundleIdentifier, team: team)
-            self.context.sharedContext.appendAppID(appID)
+            if isActiveTeam {
+                self.context.sharedContext.appendAppID(appID)
+            }
             self.debugLog("[FetchProvisioningProfiles] Successfully registered new App ID '\(appID.bundleIdentifier)' on Apple portal.")
             return appID
         }
@@ -356,14 +366,18 @@ private extension FetchProvisioningProfilesOperation{
         var seenGroupIDs = Set<String>()
         
         do {
+            let activeTeamID = try? await AuthManager.shared.getAuthenticatedTeam().identifier
+            let isActiveTeam = (activeTeamID == nil || activeTeamID == team.identifier)
             let appGroups = try await TaskChainCoalescer.shared.coalesce(key: "fetch_app_groups_\(team.identifier)") {
-                if let cachedGroups = self.context.sharedContext.appGroups {
+                if isActiveTeam, let cachedGroups = self.context.sharedContext.appGroups {
                     self.debugLog("[FetchProvisioningProfiles] Using cached App Groups from shared context.")
                     return cachedGroups
                 }
                 self.debugLog("[FetchProvisioningProfiles] Fetching existing App Groups from Apple for team \(team.identifier)...")
                 let fetched = try await DeveloperPortalProxy.shared.fetchAppGroups(for: team)
-                self.context.sharedContext.appGroups = fetched
+                if isActiveTeam {
+                    self.context.sharedContext.appGroups = fetched
+                }
                 self.verboseLog("[FetchProvisioningProfiles] Found \(fetched.count) existing App Groups on portal for team \(team.identifier): \(fetched.map { $0.groupIdentifier })")
                 return fetched
             }
@@ -376,7 +390,7 @@ private extension FetchProvisioningProfilesOperation{
                 guard seenGroupIDs.insert(adjustedGroupIdentifier).inserted else { continue }
                 
                 let group: ALTAppGroup
-                if let existing = self.context.sharedContext.appGroups?.first(where: { $0.groupIdentifier == adjustedGroupIdentifier }) {
+                if let existing = appGroups.first(where: { $0.groupIdentifier == adjustedGroupIdentifier }) ?? (isActiveTeam ? self.context.sharedContext.appGroups?.first(where: { $0.groupIdentifier == adjustedGroupIdentifier }) : nil) {
                     group = existing
                 } else {
                     // Not all characters are allowed in group names, so we replace periods with spaces (like Apple does).
@@ -384,11 +398,13 @@ private extension FetchProvisioningProfilesOperation{
                     do {
                         group = try await TaskChainCoalescer.shared.coalesce(key: "add_app_group_\(adjustedGroupIdentifier)") {
                             // skip add if already added into shared by other tasks
-                            if let existing = self.context.sharedContext.appGroups?.first(where: { $0.groupIdentifier == adjustedGroupIdentifier }) {
+                            if isActiveTeam, let existing = self.context.sharedContext.appGroups?.first(where: { $0.groupIdentifier == adjustedGroupIdentifier }) {
                                 return existing
                             }
                             let newGroup = try await DeveloperPortalProxy.shared.addAppGroup(name: name, groupIdentifier: adjustedGroupIdentifier, team: team)
-                            self.context.sharedContext.appendAppGroup(newGroup)
+                            if isActiveTeam {
+                                self.context.sharedContext.appendAppGroup(newGroup)
+                            }
                             self.verboseLog("[FetchProvisioningProfiles] Created new App Group \(newGroup.groupIdentifier).")
                             return newGroup
                         }

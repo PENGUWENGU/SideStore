@@ -51,6 +51,13 @@ final class AppIDsViewController: UICollectionViewController
         self.dataSource.fetchedResultsController.delegate = self
         
         self.activityIndicatorBarButtonItem.isIndicatingActivity = true
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(AppIDsViewController.handleActiveAccountDidChange(_:)),
+            name: AuthManager.didChangeActiveAccountNotification,
+            object: nil
+        )
     }
     
     override func viewWillAppear(_ animated: Bool)
@@ -63,6 +70,13 @@ final class AppIDsViewController: UICollectionViewController
         {
             self.fetchAppIDs()
         }
+    }
+
+    @objc private func handleActiveAccountDidChange(_ notification: Notification)
+    {
+        self.didInitialFetch = false
+        self.updateActiveTeam()
+        self.fetchAppIDs()
     }
 }
 

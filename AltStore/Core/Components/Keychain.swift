@@ -97,10 +97,104 @@ public class Keychain
             }
         }
     }
+
+    // MARK: - Multi-Account Credentials Storage
+
+    private let storedAccountsKey = "storedAccounts_v1"
+
+    public func getAllStoredAccounts() -> [StoredAccountCredentials] {
+        guard let data = try? self.keychain.getData(self.storedAccountsKey),
+              let accounts = try? JSONDecoder().decode([StoredAccountCredentials].self, from: data) else {
+            return []
+        }
+        return accounts
+    }
+
+    private func setAllStoredAccounts(_ accounts: [StoredAccountCredentials]) {
+        if let data = try? JSONEncoder().encode(accounts) {
+            try? self.keychain.set(data, key: self.storedAccountsKey)
+        }
+    }
+
+    public static func normalizeAppleID(_ appleID: String) -> String {
+        return appleID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    public func getStoredAccount(forAppleID appleID: String) -> StoredAccountCredentials? {
+        let normalized = Self.normalizeAppleID(appleID)
+        return self.getAllStoredAccounts().first { $0.normalizedAppleID == normalized }
+    }
+
+    public func getStoredAccount(forTeamIdentifier teamID: String) -> StoredAccountCredentials? {
+        guard !teamID.isEmpty else { return nil }
+        return self.getAllStoredAccounts().first { $0.teamIdentifier == teamID }
+    }
+
+    public func saveStoredAccount(_ record: StoredAccountCredentials) {
+        var accounts = self.getAllStoredAccounts()
+        if let idx = accounts.firstIndex(where: { $0.normalizedAppleID == record.normalizedAppleID }) {
+            accounts[idx] = record
+        } else {
+            accounts.append(record)
+        }
+        self.setAllStoredAccounts(accounts)
+    }
+
+    public func removeStoredAccount(forAppleID appleID: String) {
+        let normalized = Self.normalizeAppleID(appleID)
+        var accounts = self.getAllStoredAccounts()
+        accounts.removeAll { $0.normalizedAppleID == normalized }
+        self.setAllStoredAccounts(accounts)
+    }
+
+    @discardableResult
+    public func syncActiveAccountToStore(
+        teamIdentifier: String? = nil,
+        teamName: String? = nil,
+        teamTypeRawValue: Int? = nil,
+        accountIdentifier: String? = nil,
+        firstName: String? = nil,
+        lastName: String? = nil,
+        certificateSerialNumber: String? = nil,
+        isDeviceRegistered: Bool? = nil
+    ) -> StoredAccountCredentials? {
+        guard let email = self.appleIDEmailAddress, !email.isEmpty else { return nil }
+        let normalized = Self.normalizeAppleID(email)
+        var existing = self.getStoredAccount(forAppleID: email) ?? StoredAccountCredentials(
+            appleID: email,
+            normalizedAppleID: normalized,
+            updatedAt: Date()
+        )
+
+        existing.appleID = email
+        existing.normalizedAppleID = normalized
+        if let password = self.appleIDPassword { existing.password = password }
+        if let adsid = self.appleIDAdsid { existing.adsid = adsid }
+        if let xcodeToken = self.appleIDXcodeToken { existing.xcodeToken = xcodeToken }
+        if let certData = self.signingCertificate {
+            existing.certificateData = certData
+            existing.certificatePassword = self.signingCertificatePassword
+        }
+        if let serial = certificateSerialNumber {
+            existing.certificateSerialNumber = serial
+        }
+        if let teamIdentifier { existing.teamIdentifier = teamIdentifier }
+        if let teamName { existing.teamName = teamName }
+        if let teamTypeRawValue { existing.teamTypeRawValue = teamTypeRawValue }
+        if let accountIdentifier { existing.accountIdentifier = accountIdentifier }
+        if let firstName { existing.firstName = firstName }
+        if let lastName { existing.lastName = lastName }
+        if let isDeviceRegistered { existing.isDeviceRegistered = isDeviceRegistered }
+        existing.updatedAt = Date()
+
+        self.saveStoredAccount(existing)
+        return existing
+    }
     
     private init()
     {
         self.migrateLegacyKeychainItems()
+        _ = self.syncActiveAccountToStore()
     }
     
     private func migrateLegacyKeychainItems()
@@ -175,3 +269,38 @@ public class Keychain
         debugLog("[Keychain] All Keychain items cleared.")
     }
 }
+
+public struct StoredAccountCredentials: Codable, Equatable, Sendable, Identifiable {
+    public var id: String { normalizedAppleID }
+    public var appleID: String
+    public var normalizedAppleID: String
+    public var accountIdentifier: String?
+    public var firstName: String?
+    public var lastName: String?
+    public var teamIdentifier: String?
+    public var teamName: String?
+    public var teamTypeRawValue: Int?
+    public var password: String?
+    public var adsid: String?
+    public var xcodeToken: String?
+    public var certificateSerialNumber: String?
+    public var certificateData: Data?
+    public var certificatePassword: String?
+    public var isDeviceRegistered: Bool?
+    public var updatedAt: Date
+
+    public var displayName: String {
+        var components = PersonNameComponents()
+        components.givenName = firstName
+        components.familyName = lastName
+        let formatted = PersonNameComponentsFormatter.localizedString(from: components, style: .default).trimmingCharacters(in: .whitespacesAndNewlines)
+        if !formatted.isEmpty {
+            return formatted
+        }
+        if let teamName, !teamName.isEmpty {
+            return teamName
+        }
+        return appleID
+    }
+}
+

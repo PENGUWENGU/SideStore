@@ -224,6 +224,17 @@ final class SignInOperation: BaseStandaloneOperation<StandaloneOperationContext,
                 let certificate = result.certificate
                 let session = result.session
 
+                Keychain.shared.syncActiveAccountToStore(
+                    teamIdentifier: team.identifier,
+                    teamName: team.name,
+                    teamTypeRawValue: team.type.rawValue,
+                    accountIdentifier: team.account?.identifier,
+                    firstName: team.account?.firstName,
+                    lastName: team.account?.lastName,
+                    certificateSerialNumber: certificate?.serialNumber ?? CertificateManager.shared.activeCertificate?.serialNumber,
+                    isDeviceRegistered: UserDefaults.standard.isDeviceRegistered
+                )
+
                 self.verboseLog("[SignInOperation] finalizeAuthentication: Authentication Success for team \(team.identifier) account.")
                 
                 var didResign = false
@@ -265,6 +276,9 @@ private extension SignInOperation {
             let accountIdentifier = altTeam.account?.identifier ?? altTeam.identifier
             if let tempAccount = Account.first(satisfying: NSPredicate(format: "%K == %@", #keyPath(Account.identifier), accountIdentifier), in: context) {
                 account = tempAccount
+            } else if let providedEmail = self.appleIDEmailAddress,
+                      let existingByEmail = Account.first(satisfying: NSPredicate(format: "%K ==[c] %@", #keyPath(Account.appleID), providedEmail), in: context) {
+                account = existingByEmail
             } else if let altAccount = altTeam.account {
                 account = Account(altAccount, context: context)
             } else {
@@ -319,6 +333,15 @@ private extension SignInOperation {
                     }
                 }
             }
+
+            Keychain.shared.syncActiveAccountToStore(
+                teamIdentifier: team.identifier,
+                teamName: team.name,
+                teamTypeRawValue: Int(team.typeValue),
+                accountIdentifier: account.identifier,
+                firstName: account.firstName,
+                lastName: account.lastName
+            )
             
             try context.save()
         }

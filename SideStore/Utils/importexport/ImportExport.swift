@@ -118,7 +118,13 @@ class ImportExport {
             let decryptedData = try AES.GCM.open(sealedBox, using: key)
             let account = try Foundation.JSONDecoder().decode(ImportedAccount.self, from: decryptedData)
             
-            await AuthManager.shared.signOut()
+            if AuthManager.shared.isAuthenticated {
+                Keychain.shared.syncActiveAccountToStore(
+                    certificateSerialNumber: CertificateManager.shared.activeCertificate?.serialNumber,
+                    isDeviceRegistered: UserDefaults.standard.isDeviceRegistered
+                )
+            }
+            Keychain.shared.clearSignInInfo(keepAnisetteData: true)
             AuthManager.shared.currentAppleID = account.email
             if let pass = account.password, !pass.isEmpty {
                 AuthManager.shared.password = pass
@@ -128,6 +134,7 @@ class ImportExport {
             
             let altCert = try CertificateManager.parse(account.certificateData, password: account.certificatePassword)
             try CertificateManager.shared.setActiveCertificate(altCert)
+            Keychain.shared.syncActiveAccountToStore(certificateSerialNumber: altCert.serialNumber)
             
             return account
         } catch {

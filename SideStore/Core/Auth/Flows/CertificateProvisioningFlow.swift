@@ -49,7 +49,18 @@ final class CertificateProvisioningFlow: @unchecked Sendable {
     
     private func performCertificateResolution(for team: ALTTeam) async throws -> ALTCertificate? {
         let activeCert = CertificateManager.shared.activeCertificate?.certificate
+        let belongsToAnotherStoredAccount: Bool = {
+            guard let serial = activeCert?.serialNumber else { return false }
+            let stored = Keychain.shared.getAllStoredAccounts()
+            return stored.contains { account in
+                account.certificateSerialNumber?.lowercased() == serial.lowercased() &&
+                account.teamIdentifier != nil &&
+                account.teamIdentifier != team.identifier
+            }
+        }()
+
         let isCustomCert = activeCert?.data.map { data in
+            if belongsToAnotherStoredAccount { return false }
             let details = parseCertificate(derData: data)
             return !details.subject.contains(team.identifier) && !details.issuer.contains(team.identifier)
         } ?? false
@@ -93,6 +104,14 @@ final class CertificateProvisioningFlow: @unchecked Sendable {
                 debugLog("[CertificateProvisioningFlow] Active certificate (\(activeCert.serialNumber)) and running bundle certificate (\(mainBundleCertSerial)) mismatch detected. Running Bundle Certificate is still active on the Paid account portal. Using active Keychain certificate.")
             }
             return keyStoreCert
+        }
+
+        for portalCert in portalCertificates {
+            if var localCert = CertificateManager.shared.getLocalCertificate(serialNumber: portalCert.serialNumber) {
+                localCert.machineIdentifier = portalCert.machineIdentifier
+                debugLog("[CertificateProvisioningFlow] Found matching local signable certificate (\(localCert.serialNumber)) for team \(team.identifier).")
+                return localCert
+            }
         }
         
         if let mainBundleCertSerial = mainBundleCertSerial,

@@ -97,6 +97,7 @@ public final class CertificateManager: @unchecked Sendable {
                 saveCertificate(cert)
                 let active = ActiveSigningCertificate(certificate: cert, p12Data: p12Data, password: password)
                 self.activeCertificate = active
+                Keychain.shared.syncActiveAccountToStore(certificateSerialNumber: cert.serialNumber)
                 debugLog("[CertificateManager] setActiveCertificate: Successfully stored certificate (serial: \(cert.serialNumber)).")
             } catch {
                 debugLog("[CertificateManager] setActiveCertificate failed to export/encrypt certificate: \(error)")
@@ -107,6 +108,21 @@ public final class CertificateManager: @unchecked Sendable {
             Keychain.shared.clearCertificates()
             debugLog("[CertificateManager] setActiveCertificate: Cleared active certificate in Keychain.")
         }
+    }
+
+    /// Restores the active signing certificate for a stored account when switching accounts.
+    public func restoreCertificateForAccount(_ record: StoredAccountCredentials) {
+        if let serial = record.certificateSerialNumber,
+           let localCert = self.getLocalCertificate(serialNumber: serial) {
+            try? self.setActiveCertificate(localCert)
+            return
+        }
+        if let p12Data = record.certificateData,
+           let parsedCert = try? Self.parse(p12Data, password: record.certificatePassword) {
+            try? self.setActiveCertificate(parsedCert)
+            return
+        }
+        self.clearActiveCertificate()
     }
 
     /// Clears active certificate in memory cache and Keychain.

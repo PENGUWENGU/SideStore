@@ -172,6 +172,7 @@ final class SettingsViewController: UITableViewController
         
         NotificationCenter.default.addObserver(self, selector: #selector(SettingsViewController.openPatreonSettings(_:)), name: AppDelegate.openPatreonSettingsDeepLinkNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(SettingsViewController.openErrorLog(_:)), name: ToastView.openErrorLogNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(SettingsViewController.handleActiveAccountDidChange(_:)), name: AuthManager.didChangeActiveAccountNotification, object: nil)
     }
     
     
@@ -476,7 +477,11 @@ private extension SettingsViewController
         guard self.isViewLoaded else { return }
         let typeIndexPath = IndexPath(row: 2, section: Section.account.rawValue)
         if let typeCell = self.tableView.cellForRow(at: typeIndexPath) as? InsetGroupTableViewCell {
-            typeCell.style = (self.accountStatus == .completed) ? .bottom : .middle
+            typeCell.style = .middle
+        }
+        let switcherIndexPath = IndexPath(row: 3, section: Section.account.rawValue)
+        if let switcherCell = self.tableView.cellForRow(at: switcherIndexPath) as? AccountSwitcherRow {
+            switcherCell.style = (self.accountStatus == .completed) ? .bottom : .middle
         }
     }
     
@@ -488,6 +493,16 @@ private extension SettingsViewController
             await AccountVerificationRow.resolvePendingActions(for: self.accountStatus, team: team, presentingViewController: self)
             self.startAccountVerification(for: team)
         }
+    }
+
+    private func presentAccountsManager()
+    {
+        let accountsVC = AccountsManagementViewController(hostViewController: self) { [weak self] in
+            self?.update()
+        }
+        let navController = UINavigationController(rootViewController: accountsVC)
+        navController.modalPresentationStyle = .formSheet
+        self.present(navController, animated: true)
     }
     
     private func prepare(_ settingsHeaderFooterView: SettingsHeaderFooterView, for section: Section, isHeader: Bool)
@@ -653,10 +668,20 @@ private extension SettingsViewController
     {
         debugLog("[SettingsVC] signOut() invoked by user action")
         let contentVC = SignOutAlertViewController()
+        let storedCount = AuthManager.shared.storedAccounts.count
+        let signOutMessage: String
+        if storedCount > 1, let currentEmail = AuthManager.shared.currentAppleID {
+            signOutMessage = String(
+                format: NSLocalizedString("Are you sure you want to sign out of %@? SideStore will switch to your next signed-in Apple ID.", comment: ""),
+                currentEmail
+            )
+        } else {
+            signOutMessage = NSLocalizedString("Are you sure you want to sign out? You will no longer be able to install or refresh apps once you sign out.", comment: "")
+        }
         
         let alertController = UIAlertController(
             title: NSLocalizedString("Sign Out", comment: ""),
-            message: NSLocalizedString("Are you sure you want to sign out? You will no longer be able to install or refresh apps once you sign out.", comment: ""),
+            message: signOutMessage,
             preferredStyle: .alert
         )
         
@@ -937,6 +962,11 @@ private extension SettingsViewController
             self.performSegue(withIdentifier: "showErrorLog", sender: nil)
         }
     }
+
+    @objc func handleActiveAccountDidChange(_: Notification) {
+        guard self.isViewLoaded else { return }
+        self.update()
+    }
 }
 
 extension SettingsViewController
@@ -955,8 +985,12 @@ extension SettingsViewController
     
     override func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat
     {
-        if Section.allCases[indexPath.section] == .account && indexPath.row == 3 {
-            return AccountVerificationRow.preferredHeight
+        if Section.allCases[indexPath.section] == .account {
+            if indexPath.row == 3 {
+                return AccountSwitcherRow.preferredHeight
+            } else if indexPath.row == 4 {
+                return AccountVerificationRow.preferredHeight
+            }
         }
         let effectiveIndexPath: IndexPath
         if Section.allCases[indexPath.section] == .advancedSettings {
@@ -972,8 +1006,13 @@ extension SettingsViewController
     {
         if Section.allCases[indexPath.section] == .account {
             if indexPath.row == 2, let insetCell = cell as? InsetGroupTableViewCell {
-                insetCell.style = (self.accountStatus == .completed) ? .bottom : .middle
-            } else if indexPath.row == 3, let actionCell = cell as? AccountVerificationRow {
+                insetCell.style = .middle
+            } else if indexPath.row == 3, let switcherCell = cell as? AccountSwitcherRow {
+                switcherCell.style = (self.accountStatus == .completed) ? .bottom : .middle
+                switcherCell.backgroundColor = .clear
+                switcherCell.contentView.backgroundColor = .clear
+                switcherCell.backgroundConfiguration = .clear()
+            } else if indexPath.row == 4, let actionCell = cell as? AccountVerificationRow {
                 actionCell.style = .bottom
                 actionCell.backgroundColor = .clear
                 actionCell.contentView.backgroundColor = .clear
@@ -984,7 +1023,7 @@ extension SettingsViewController
 
     override func tableView(_ tableView: UITableView, indentationLevelForRowAt indexPath: IndexPath) -> Int
     {
-        if Section.allCases[indexPath.section] == .account && indexPath.row == 3 {
+        if Section.allCases[indexPath.section] == .account && indexPath.row >= 3 {
             return 0
         }
         let effectiveIndexPath: IndexPath
@@ -1004,7 +1043,7 @@ extension SettingsViewController
         {
         case _ where isSectionHidden(section): return 0
         case .signIn: return (self.activeTeam == nil) ? 1 : 0
-        case .account: return (self.activeTeam == nil) ? 0 : (self.accountStatus == .completed ? 3 : 4)
+        case .account: return (self.activeTeam == nil) ? 0 : (self.accountStatus == .completed ? 4 : 5)
         case .appRefresh: return AppRefreshRow.allCases.count
         case .advancedSettings: return AdvancedSettingsRow.allCases.count
         default: return super.tableView(tableView, numberOfRowsInSection: section.rawValue)
@@ -1013,12 +1052,19 @@ extension SettingsViewController
     
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell
     {
-        if Section.allCases[indexPath.section] == .account && indexPath.row == 3 {
-            let cell = tableView.dequeueReusableCell(withIdentifier: AccountVerificationRow.reuseIdentifier) as? AccountVerificationRow
-                ?? AccountVerificationRow()
-            cell.configure(with: self.accountStatus)
-            cell.style = .bottom
-            return cell
+        if Section.allCases[indexPath.section] == .account {
+            if indexPath.row == 3 {
+                let cell = tableView.dequeueReusableCell(withIdentifier: AccountSwitcherRow.reuseIdentifier) as? AccountSwitcherRow
+                    ?? AccountSwitcherRow()
+                cell.configure(accountCount: AuthManager.shared.storedAccounts.count, isBottomCell: self.accountStatus == .completed)
+                return cell
+            } else if indexPath.row == 4 {
+                let cell = tableView.dequeueReusableCell(withIdentifier: AccountVerificationRow.reuseIdentifier) as? AccountVerificationRow
+                    ?? AccountVerificationRow()
+                cell.configure(with: self.accountStatus)
+                cell.style = .bottom
+                return cell
+            }
         }
         
         let effectiveIndexPath: IndexPath
@@ -1033,7 +1079,7 @@ extension SettingsViewController
         if Section.allCases[indexPath.section] == .account {
             if indexPath.row == 2 {
                 if let insetCell = cell as? InsetGroupTableViewCell {
-                    insetCell.style = (self.accountStatus == .completed) ? .bottom : .middle
+                    insetCell.style = .middle
                 }
             }
         }
@@ -1139,6 +1185,9 @@ extension SettingsViewController
         case .signIn: self.signIn()
         case .account:
             if indexPath.row == 3 {
+                tableView.deselectRow(at: indexPath, animated: true)
+                self.presentAccountsManager()
+            } else if indexPath.row == 4 {
                 tableView.deselectRow(at: indexPath, animated: true)
                 self.resolvePendingAccountActions()
             }
